@@ -1,0 +1,6 @@
+{
+  "name": "Foundry",
+  "tree": { 
+    "$path": "src" 
+  }
+}

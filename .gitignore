@@ -1,0 +1,7 @@
+/Packages/
+/ServerPackages/
+/DevPackages/
+/build/
+.DS_Store
+__pycache__/
+*.pyc
