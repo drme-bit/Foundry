@@ -5,6 +5,60 @@ return function(Foundry, t)
 		local ok, reason = pcall(callback)
 		assert(not ok and tostring(reason):find(expected, 1, true), tostring(reason))
 	end
+	cases["automatic context detects sides without mutating supplied options"] = function()
+		for _, side in { "Server", "Client" } do
+			local platform = {
+				IsServer = function()
+					return side == "Server"
+				end,
+				IsClient = function()
+					return side == "Client"
+				end,
+			}
+			local options = {
+				Platform = platform,
+				Network = {
+					Contracts = {},
+					CreateAdapter = function()
+						return { On = function() end, Send = function() end }
+					end,
+				},
+			}
+			local a = Foundry:ApplicationContext(options)
+			local b = Foundry.ApplicationContext(options)
+			assert(a ~= b and a:GetSide() == side and b:GetSide() == side)
+			assert(options.Side == nil and options.Network.Side == nil and options.Shutdown == nil)
+			a:Destroy()
+			b:Destroy()
+			fails(function()
+				Foundry:ApplicationContext({
+					Platform = platform,
+					Side = if side == "Server" then "Client" else "Server",
+				})
+			end, "cannot be overridden")
+			fails(function()
+				Foundry:ApplicationContext({
+					Platform = platform,
+					Network = { Side = if side == "Server" then "Client" else "Server" },
+				})
+			end, "Network side differs")
+		end
+		fails(function()
+			Foundry:ApplicationContext()
+		end, "requires Roblox")
+		fails(function()
+			Foundry:ApplicationContext({
+				Platform = {
+					IsServer = function()
+						return true
+					end,
+					IsClient = function()
+						return true
+					end,
+				},
+			})
+		end, "Cannot determine")
+	end
 	cases["side constructors support colon and dot calls and isolate applications"] = function()
 		local a, b = Foundry:ServerContext(), Foundry.ServerContext()
 		local client = Foundry.ClientContext({})

@@ -24,7 +24,8 @@ Core code does not load game configuration, profiles or content assets.
 
 ## Dependency ownership
 
-Foundry declares t and Trove in wally.toml. Roblox dependency resolution supports:
+Foundry declares t, Trove and SwiftPacket in wally.toml. SwiftPacket is loaded lazily
+only when Network needs the default transport. Contracts alone configure networking. Roblox dependency resolution supports:
 
 1. Wally's aliases beside the installed Foundry module, preserving dependency versions.
 2. An internal Packages folder in the bundled model.
@@ -69,3 +70,11 @@ The release archive excludes tests, scripts, docs and build-only project files.
 Use scripts/check.py before release: it verifies source types/syntax, portable
 suites, real dependency integration, documentation links, bundled model syntax and
 archive boundaries. Roblox Studio playtests are still needed for actual engine behavior.
+
+Persistence owns buffered sessions, lease fencing and per-key ordered requests.
+Schema derives serializable structural identities from defaults and reconciles
+compatible additions. Value isolates snapshots and enforces synchronous callbacks.
+The Memory adapter supports portable checks; Roblox/DataStore contains the engine
+UpdateAsync, request-budget, GUID and serialization ports. Infrastructure registers
+the manager and named stores as server beans; Inspector reads status snapshots.
+See [Persistence](persistence.md) for the public interface and limitations.

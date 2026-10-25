@@ -1,4 +1,5 @@
 --!strict
+local Persistence = require("../Persistence/Manager")
 local Dependencies = require("../Roblox/Dependencies")
 local ApplicationContext = require("./Container")
 local Feature = require("./Feature")
@@ -21,6 +22,7 @@ type NetworkOptions = {
 }
 export type ShutdownOptions = { Bind: (() -> ()) -> () }
 export type Options = {
+	Persistence: Persistence.Options?,
 	Shutdown: ShutdownOptions?,
 	Players: Registry.Options?,
 	Server: ServerInfo.Options?,

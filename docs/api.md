@@ -1,6 +1,6 @@
 # Foundry API reference
 
-Target: `drme/foundry@0.1.0`.
+Target: `drme-bit/foundry@0.2.0`.
 
 [README](../README.md) · [Getting started](getting-started.md) · [Architecture](architecture.md)
 
@@ -37,6 +37,7 @@ requiring physical implementation paths. Export tables are frozen.
 
 | Export | Purpose |
 | --- | --- |
+| `ApplicationContext(options?)` | Application with automatic server/client detection |
 | `ServerContext(options?)` | Independent server application |
 | `ClientContext(options?)` | Independent client application |
 | `Boot(options?)` | Lower-level application composition |
@@ -54,6 +55,8 @@ requiring physical implementation paths. Export tables are frozen.
 | `Network.SwiftPacket` | Compiler/adapter for a supplied SwiftPacket library |
 | `Players.Registry` | Server player-session registry |
 | `Server.Info` | Server metadata and readiness |
+| `Persistence.new(options)` | Standalone persistence manager |
+| `Persistence.Memory.new()` | Portable in-memory storage adapter |
 | `Core.ApplicationContext` | Low-level dependency/lifecycle container |
 | `Core.Scope` | Alias of Scope |
 
@@ -68,12 +71,18 @@ For example: `type App = Foundry.Application`.
 ## Application construction
 
 ```luau
+Foundry:ApplicationContext(options?): Application
 Foundry:ServerContext(options?): Application
 Foundry:ClientContext(options?): Application
 Foundry.Boot(options?): Application
 ```
 
-Side constructors support colon and dot calls. Each call creates a separate app;
+ApplicationContext supports colon and dot calls. It detects Server/Client with
+RunService, supplies task.wait and binds server shutdown automatically. Explicit
+Platform, Wait and Shutdown options override these defaults. Outside Roblox an
+explicit Platform port is required; Side cannot override the detected runtime.
+
+Side constructors remain available and support colon and dot calls. Each call creates a separate app;
 there is no global context singleton. Construction does not invoke provider
 factories. Requiring your own feature modules can execute their top-level code.
 
@@ -92,6 +101,7 @@ enabled. Server-only options still require Side = "Server".
 | `Name` | `string?` | Side constructors default to Foundry/Server or Foundry/Client |
 | `Side` | `string?` | Server, Client or Shared; inferred by side constructors |
 | `Platform` | `any?` | Side-check port, normally RunService |
+| `Persistence` | `PersistenceOptions?` | Server-only managed stores; see [Persistence](persistence.md) |
 | `Features` | `{FeatureDefinition}?` | Explicit feature manifests |
 | `Providers` | `{Definition}?` | Root beans |
 | `Values` | `{[string]: any}?` | Borrowed values available to features |
@@ -418,15 +428,16 @@ the app. Records are detached. The minimal LogPort provides Debug, Info and Erro
 | `Side` | Inferred by side-specific constructors |
 | `Contracts` | Ordered contract definitions |
 | `CreateAdapter(deps)` | Alternative transport factory |
-| `Transport` | Built-in choice: "SwiftPacket" |
-| `Library` | Supplied SwiftPacket library for automatic packet compilation |
-| `PacketsBinding` | Precompiled packet binding; defaults to WirePackets |
+| `Transport` | Defaults to "SwiftPacket" |
+| `Library` | Optional override of the bundled SwiftPacket library |
+| `PacketsBinding` | Optional explicit binding name for precompiled packets |
 | `Inject` | Factory dependencies; defaults to packet binding when needed |
 | `PeersRemoving` | Optional peer-removal signal to release rate-limit state |
 
-Provide CreateAdapter or Transport = "SwiftPacket". SwiftPacket is an explicit
-transport integration, not a bundled dependency. Without Library, register the
-precompiled packets under PacketsBinding. Adapters with Destroy are scope-owned.
+Enabling Network selects SwiftPacket unless CreateAdapter is supplied. SwiftPacket is the bundled default. Network = { Contracts = contracts } is sufficient.
+Library overrides the installed SwiftPacket implementation; an explicit PacketsBinding
+selects a precompiled packet table instead. CreateAdapter selects a custom transport.
+Adapters with Destroy are scope-owned.
 
 ### Contracts
 
@@ -511,7 +522,10 @@ Foundry.Network.SwiftPacket.new(packets, side): adapter
 
 Define preserves declaration order/rate limits and rejects client traffic sent
 to client-receive channels on the server. The adapter exposes On, Send and
-EnforcesRateLimit = true.
+EnforcesRateLimit = true. Repeated compatible definitions reuse packet objects;
+conflicting definitions are rejected before changing packets. The bundled library
+is loaded only when an automatic Network provider is created. Destroy releases
+Foundry subscriptions, not SwiftPacket's engine-lifetime shared transport.
 
 A custom adapter provides On(name, callback), returning a disconnectable handle,
 and Send(name, packedValues, target?). On supplies the server sender as its first
@@ -669,3 +683,9 @@ infrastructure hook for composition diagnostics.
 Utility.Journal is internal, not exported: new(capacity), Push(record), Snapshot().
 Capacity is an integer 0..4096; snapshots preserve Sequence order and shallow-copy
 flat Fields maps. It is bounded diagnostic storage, not a database/event store.
+
+## Persistence API
+
+See [Persistence](persistence.md) for store definitions, profile methods, automatic
+schema reconciliation and storage guarantees. PersistenceOptions and StoreOptions
+are exported Luau types. Configured stores are injectable by name.

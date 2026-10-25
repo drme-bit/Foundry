@@ -3,13 +3,18 @@
 registry = "test"
 
 [[package]]
-name = "drme/foundry"
-version = "0.1.0"
-dependencies = [["Trove", "sleitnick/trove@1.8.0"], ["t", "osyrisrblx/t@3.1.1"]]
+name = "drme-bit/foundry"
+version = "0.2.0"
+dependencies = [["SwiftPacket", "skatingii/swiftpacket@0.1.4"], ["Trove", "sleitnick/trove@1.8.0"], ["t", "osyrisrblx/t@3.1.1"]]
 
 [[package]]
 name = "osyrisrblx/t"
 version = "3.1.1"
+dependencies = []
+
+[[package]]
+name = "skatingii/swiftpacket"
+version = "0.1.4"
 dependencies = []
 
 [[package]]

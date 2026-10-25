@@ -9,7 +9,7 @@ the bundled model. The server and every client start their own application.
 
 ## Wally installation
 
-Add `Foundry = "drme/foundry@=0.1.0"` to your game's `[dependencies]` once that
+Add `Foundry = "drme-bit/foundry@=0.2.0"` to your game's `[dependencies]` once that
 release is available in the registry, then run `wally install`.
 Map the generated Packages directory to `ReplicatedStorage.Packages`:
 
@@ -58,17 +58,15 @@ project intentionally have different dependency mappings.
 
 ```luau
 local Foundry = require(game:GetService("ReplicatedStorage").Packages.Foundry)
-local app = Foundry:ServerContext({
+local app = Foundry:ApplicationContext({
     Name = "MyGame/Server",
-    Platform = game:GetService("RunService"),
-    Wait = task.wait,
-    Shutdown = { Bind = function(callback) game:BindToClose(callback) end },
     Providers = serverProviders,
 })
 app:Start()
 ```
 
-Shutdown is optional. When configured, Foundry registers one callback after startup;
+ApplicationContext detects the runtime through RunService and supplies task.wait.
+On the server it registers one BindToClose callback after startup;
 you do not need a second manual BindToClose. You can still call app:Destroy yourself.
 The hook does not cover a shutdown that occurs before startup finishes.
 
@@ -76,10 +74,8 @@ The hook does not cover a shutdown that occurs before startup finishes.
 
 ```luau
 local Foundry = require(game:GetService("ReplicatedStorage").Packages.Foundry)
-local app = Foundry:ClientContext({
+local app = Foundry:ApplicationContext({
     Name = "MyGame/Client",
-    Platform = game:GetService("RunService"),
-    Wait = task.wait,
     Providers = clientProviders,
 })
 app:Start()

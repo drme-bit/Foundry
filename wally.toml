@@ -1,7 +1,7 @@
 [package]
-name = "drme/foundry"
+name = "drme-bit/foundry"
 description = "Application lifecycle, dependency injection and runtime infrastructure for Roblox"
-version = "0.1.0"
+version = "0.2.0"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 private = false
@@ -23,10 +23,13 @@ include = [
     "default.project.json",
     "src",
     "src/**",
-    "LICENSE",
+    "LICENCE",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md",
     "wally.toml",
 ]
 
 [dependencies]
 t = "osyrisrblx/t@=3.1.1"
 Trove = "sleitnick/trove@=1.8.0"
+SwiftPacket = "skatingii/swiftpacket@=0.1.4"

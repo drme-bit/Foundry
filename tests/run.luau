@@ -50,4 +50,9 @@ for name, case in require("./suites/Shutdown")(require("../src")) do
 	count += 1
 	print(`PASS Shutdown: {name}`)
 end
+for name, case in require("./suites/Persistence")(require("../src")) do
+	case()
+	count += 1
+	print(`PASS Persistence: {name}`)
+end
 print(`Foundry: {count} tests passed`)

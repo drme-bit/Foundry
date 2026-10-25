@@ -19,7 +19,7 @@ function Inspector.GetSnapshot(self: any): any
 		Graph = app:GetGraph(),
 		History = app:GetHistory(),
 	}
-	for _, name in { "Scheduler", "Network", "PlayerRegistry", "ServerInfo" } do
+	for _, name in { "Scheduler", "Network", "PlayerRegistry", "ServerInfo", "Persistence" } do
 		local ok, instance = pcall(function()
 			return app:Get(name)
 		end)

@@ -27,7 +27,7 @@ def main():
             raise SystemExit('FAIL ' + name)
         print('PASS ' + name, flush=True)
         return result.stdout
-    if not (ROOT/'Packages/t.lua').exists() or not (ROOT/'Packages/Trove.lua').exists():
+    if not (ROOT/'Packages/t.lua').exists() or not (ROOT/'Packages/Trove.lua').exists() or not (ROOT/'Packages/SwiftPacket.lua').exists():
         raise SystemExit('Run wally install first')
     build = ROOT/'build'; build.mkdir(exist_ok=True)
     run('strict source types', [tools['luau-analyze'], 'src'])
@@ -44,6 +44,16 @@ def main():
     with tempfile.TemporaryDirectory(prefix='foundry-dependency-check-') as directory:
         path = fixture.prepare(directory)
         output = run('real dependency integration', [tools['luau'], str(path)])
+        print(output.strip().splitlines()[-1])
+    spec = importlib.util.spec_from_file_location('swift_fixture', ROOT/'tests/swiftpacket.py')
+    swift = importlib.util.module_from_spec(spec); spec.loader.exec_module(swift)
+    with tempfile.TemporaryDirectory(prefix='foundry-swift-check-') as directory:
+        output = run('SwiftPacket default transport and real codec', [tools['luau'], str(swift.prepare(directory))])
+        print(output.strip().splitlines()[-1])
+    spec = importlib.util.spec_from_file_location('persistence_fixture', ROOT/'tests/persistence.py')
+    persistence = importlib.util.module_from_spec(spec); spec.loader.exec_module(persistence)
+    with tempfile.TemporaryDirectory(prefix='foundry-persistence-check-') as directory:
+        output = run('Persistence Roblox adapter and runtime wiring', [tools['luau'], str(persistence.prepare(directory))])
         print(output.strip().splitlines()[-1])
     docs = [ROOT/'README.md', ROOT/'CONTRIBUTING.md', ROOT/'CHANGELOG.md', *sorted((ROOT/'docs').rglob('*.md'))]
     errors = []
@@ -75,7 +85,8 @@ def main():
                 if result.returncode: raise SystemExit(result.stderr)
                 count += 1
         print(f'PASS {project}: {count} embedded modules', flush=True)
-    archive = build/'foundry-0.1.0.zip'
+    version = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT/'wally.toml').read_text(), re.M)[1]
+    archive = build/f'foundry-{version}.zip'
     run('Wally archive', [tools['wally'], 'package', '--output', str(archive)])
     with zipfile.ZipFile(archive) as packaged:
         names = packaged.namelist()

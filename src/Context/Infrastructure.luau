@@ -1,4 +1,5 @@
 --!strict
+local Dependencies = require("../Roblox/Dependencies")
 local Scheduler = require("../Tasks/Scheduler")
 local Host = require("../Network/Host")
 local Contract = require("../Network/Contract")
@@ -6,9 +7,32 @@ local SwiftPacket = require("../Network/Adapters/SwiftPacket")
 local Inspector = require("../Diagnostics/Inspector")
 local Registry = require("../Players/Registry")
 local ServerInfo = require("../Server/Info")
+local Persistence = require("../Persistence/Manager")
 local Infrastructure = {}
 function Infrastructure.Register(self: any, options: any, register: any)
 	local side = self:GetSide()
+	if options.Persistence then
+		assert(side == "Server", "Persistence is server-only")
+		local config = table.clone(options.Persistence)
+		config.Clock = config.Clock or options.Clock
+		config.Wait = config.Wait or options.Wait
+		config.Logger = config.Logger or self._context:GetLogger()
+		register(self, {
+			Name = "Persistence",
+			Create = function()
+				return Persistence.new(config)
+			end,
+		}, nil)
+		for name in config.Stores or {} do
+			register(self, {
+				Name = name,
+				Inject = { Persistence = "Persistence" },
+				Create = function(deps)
+					return deps.Persistence:GetStore(name)
+				end,
+			}, nil)
+		end
+	end
 	if options.Scheduler then
 		local config = table.clone(options.Scheduler)
 		config.Clock = config.Clock or options.Clock
@@ -27,10 +51,12 @@ function Infrastructure.Register(self: any, options: any, register: any)
 		local config = table.clone(options.Network)
 		assert(config.Side == "Server" or config.Side == "Client", "Network needs a Side")
 		assert(side == "Shared" or side == config.Side, "Network side differs from context")
+		config.Transport = config.Transport or "SwiftPacket"
 		assert(
 			config.CreateAdapter or config.Transport == "SwiftPacket",
-			"Provide CreateAdapter or Transport = SwiftPacket"
+			`Unknown network transport: {config.Transport}`
 		)
+		local precompiled = not config.CreateAdapter and not config.Library and config.PacketsBinding ~= nil
 		local contracts = {}
 		for _, definition in config.Contracts or {} do
 			table.insert(contracts, Contract.new(definition))
@@ -43,15 +69,20 @@ function Infrastructure.Register(self: any, options: any, register: any)
 		Contract.Registry(contracts)
 		register(self, {
 			Name = "Network",
-			Inject = config.Inject or (if config.Transport == "SwiftPacket" and not config.Library
-				then { Packets = config.PacketsBinding or "WirePackets" }
-				else {}),
+			Inject = config.Inject
+				or (if precompiled then { Packets = config.PacketsBinding or "WirePackets" } else {}),
 			Create = function(d, scope)
 				local adapter
 				if config.CreateAdapter then
 					adapter = (config.CreateAdapter :: (any) -> any)(d)
 				else
-					local packets = if config.Library then SwiftPacket.Define(config.Library, contracts) else d.Packets
+					local packets
+					if precompiled then
+						packets = d.Packets
+					else
+						local library = config.Library or Dependencies.GetSwiftPacket()
+						packets = SwiftPacket.Define(library, contracts)
+					end
 					adapter = SwiftPacket.new(packets, config.Side :: string)
 				end
 				if adapter.Destroy then

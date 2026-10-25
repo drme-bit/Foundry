@@ -32,10 +32,10 @@ local count = 0
 local tracked = table.clone(t)
 tracked.tuple = function(...) count += 1; return t.tuple(...) end
 return {
-    t = tracked, Trove = Trove, Source = BOUNDARY,
+    t = tracked, Trove = Trove, Source = BOUNDARY, EnvironmentSource = ENGINE_BOUNDARY,
     Compiled = function() return count end,
 }
-'''.replace('TROVE', literal(trove)).replace('BOUNDARY', literal(boundary)))
+'''.replace('TROVE', literal(trove)).replace('ENGINE_BOUNDARY', literal((ROOT/'src/Roblox/Environment.luau').read_text())).replace('BOUNDARY', literal(boundary)))
     # Replace only the engine boundary in this disposable copy with its test port.
     (tmp/'src/Roblox/Dependencies.luau').write_text('return require("../../dependencies")\n')
     (tmp/'run.luau').write_text('''--!nonstrict
@@ -43,31 +43,58 @@ local deps = require("./dependencies")
 local F = require("./src")
 local count = 0
 local function test(name, fn) fn(); count += 1; print("PASS Dependencies: " .. name) end
+test("Roblox runtime defaults are lazy and side detection uses the actual platform", function()
+    for _, side in { "Server", "Client" } do
+        local platform = { IsServer = function() return side == "Server" end, IsClient = function() return side == "Client" end }
+        local binds, serviceReads = 0, 0
+        local waitPort = function() end
+        local chunk = assert(loadstring(deps.EnvironmentSource))
+        setfenv(chunk, setmetatable({
+            game = {
+                GetService = function(_, name) assert(name == "RunService"); serviceReads += 1; return platform end,
+                BindToClose = function(_, callback) binds += 1; callback() end,
+            },
+            task = { wait = waitPort },
+        }, { __index = getfenv() }))
+        local boundary = chunk()
+        assert(serviceReads == 0)
+        local defaults = boundary.Get()
+        assert(defaults.Platform == platform and defaults.Wait == waitPort and serviceReads == 1)
+        local stopped = false
+        defaults.BindShutdown(function() stopped = true end)
+        assert(stopped and binds == 1)
+    end
+end)
 local function node(children)
     return { FindFirstChild = function(_, name) return children[name] end }
 end
+local tAlias, troveAlias, swiftAlias = {}, {}, {}
+local aliases = node({ t = tAlias, Trove = troveAlias, SwiftPacket = swiftAlias })
+local swift, loaded = {}, 0
+local modules = { [tAlias] = deps.t, [troveAlias] = deps.Trove, [swiftAlias] = swift }
 local function load(root, modules)
     local chunk = assert(loadstring(deps.Source))
     setfenv(chunk, setmetatable({
         game = {}, script = { Parent = { Parent = root } },
-        require = function(reference) return assert(modules[reference]) end,
+        require = function(reference) if reference == swiftAlias then loaded += 1 end; return assert(modules[reference]) end,
     }, { __index = getfenv() }))
     return chunk()
 end
-local tAlias, troveAlias = {}, {}
-local aliases = node({ t = tAlias, Trove = troveAlias })
-local modules = { [tAlias] = deps.t, [troveAlias] = deps.Trove }
 test("Wally aliases, bundled model and source layouts resolve real libraries", function()
     local wally = node({}); wally.Parent = aliases
     local bundle = node({ Packages = aliases }); bundle.Parent = node({})
     local source = node({}); source.Parent = node({ Packages = aliases })
     for _, root in { wally, bundle, source } do
+        local before = loaded
         local result = load(root, modules)
+        assert(loaded == before, "SwiftPacket must not load before Network needs it")
         assert(result.t == deps.t and result.Trove == deps.Trove and table.isfrozen(result))
+        assert(result.GetSwiftPacket() == swift and result.GetSwiftPacket() == swift)
+        assert(loaded == before + 1)
     end
 end)
 test("Wally-local aliases take precedence over unrelated sibling Packages", function()
-    local parent = node({ t = tAlias, Trove = troveAlias, Packages = node({ t = {}, Trove = {} }) })
+    local parent = node({ t = tAlias, Trove = troveAlias, SwiftPacket = swiftAlias, Packages = node({ t = {}, Trove = {}, SwiftPacket = {} }) })
     local root = node({}); root.Parent = parent
     assert(load(root, modules).t == deps.t)
 end)

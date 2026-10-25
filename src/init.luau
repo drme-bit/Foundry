@@ -1,4 +1,5 @@
 --!strict
+local Environment = require("@self/Roblox/Environment")
 local Dependencies = require("@self/Roblox/Dependencies")
 local ApplicationContext = require("@self/Context/Container")
 local Scope = require("@self/Lifecycle/Scope")
@@ -30,7 +31,12 @@ export type Scope = Scope.Scope
 export type Runtime = Runtime.Runtime
 export type Logger = Logger.Logger
 
+local Persistence = require("@self/Persistence/Manager")
+local Memory = require("@self/Persistence/Adapters/Memory")
+export type PersistenceOptions = Persistence.Options
+export type StoreOptions = Persistence.StoreOptions
 local Foundry = {
+	Persistence = table.freeze({ new = Persistence.new, Memory = Memory }),
 	t = Dependencies.t,
 	Utility = table.freeze({ Validation = Validation, Signal = Signal, Trove = Dependencies.Trove }),
 	Players = table.freeze({ Registry = Registry }),
@@ -61,6 +67,25 @@ local function create(side: string, supplied: Boot.Options?): Boot.Application
 		options.Network = network
 	end
 	return Boot.new(options)
+end
+-- Detect the execution side; engine defaults can be replaced by explicit test ports.
+function Foundry.ApplicationContext(first: any, second: Boot.Options?): Boot.Application
+	local supplied = if first == Foundry then second else first
+	local options: Boot.Options = table.clone(supplied or ({} :: Boot.Options))
+	local engine = Environment.Get()
+	local platform = options.Platform or (if engine then engine.Platform else nil)
+	assert(platform, "ApplicationContext requires Roblox or an explicit Platform port")
+	local server, client = platform:IsServer(), platform:IsClient()
+	assert(server ~= client and (server == true or client == true), "Cannot determine context execution side")
+	local side = if server then "Server" else "Client"
+	options.Platform = platform
+	if engine then
+		options.Wait = options.Wait or engine.Wait
+		if server and options.Shutdown == nil then
+			options.Shutdown = { Bind = engine.BindShutdown }
+		end
+	end
+	return create(side, options)
 end
 -- Both Foundry:ServerContext(options) and Foundry.ServerContext(options) are supported.
 function Foundry.ServerContext(first: any, second: Boot.Options?): Boot.Application

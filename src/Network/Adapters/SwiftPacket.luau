@@ -1,10 +1,33 @@
 --!strict
 -- Adapter accepts an installed SwiftPacket library or an existing raw packet table.
+local Contract = require("../Contract")
 local SwiftPacket = {}
+local defined: { [any]: any } = setmetatable({}, { __mode = "k" })
 function SwiftPacket.Define(library: any, contracts: any): any
+	local normalized = Contract.Registry(contracts)
+	local records = defined[library]
+	if not records then
+		records = {}
+		defined[library] = records
+	end
+	-- Validate all redefinitions before creating or changing any packet.
+	local signatures = {}
+	for name, definition in normalized do
+		local signature = Contract.Manifest({ [name] = definition })
+		if definition.RateLimit then
+			signature ..= `:{definition.RateLimit[1]}:{definition.RateLimit[2]}`
+		end
+		signatures[name] = signature
+		assert(not records[name] or records[name].Signature == signature, `Conflicting SwiftPacket contract: {name}`)
+	end
 	local packets = {}
 	-- Preserve contract declaration order on both peers; never derive wire IDs locally.
 	for _, contract in contracts do
+		local existing = records[contract.Name]
+		if existing then
+			packets[contract.Name] = existing.Packet
+			continue
+		end
 		local types = {}
 		for _, field in contract.Fields do
 			local kind = if type(field) == "string" then field else field.Type
@@ -20,6 +43,7 @@ function SwiftPacket.Define(library: any, contracts: any): any
 				return false
 			end)
 		end
+		records[contract.Name] = { Signature = signatures[contract.Name], Packet = packet }
 		packets[contract.Name] = packet
 	end
 	return table.freeze(packets)

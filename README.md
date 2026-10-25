@@ -13,15 +13,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Foundry = require(ReplicatedStorage.Packages.Foundry)
 local t = Foundry.t
 
-local app = Foundry:ServerContext({
+local app = Foundry:ApplicationContext({
     Name = "MyGame/Server",
-    Platform = game:GetService("RunService"),
-    Wait = task.wait,
     Config = { MaxOrders = 12 },
     ConfigSchema = t.strictInterface({ MaxOrders = t.integer }),
-    Shutdown = {
-        Bind = function(callback) game:BindToClose(callback) end,
-    },
     Providers = {
         {
             Name = "Orders",
@@ -40,7 +35,7 @@ local app = Foundry:ServerContext({
 app:Start()
 ```
 
-Foundry installs `t` and Trove as its own Wally dependencies. Consumers do not need
+Foundry installs `t`, Trove and SwiftPacket as its own Wally dependencies. Consumers do not need
 to install either separately or supply `Types` in Roblox. `Foundry.t` exposes the
 type checker; `scope:CreateTrove()` creates a cleaner owned by the scope.
 
@@ -54,12 +49,12 @@ For a published registry release, add the matching version to your game's Wally 
 
 ```toml
 [dependencies]
-Foundry = "drme/foundry@=0.1.0"
+Foundry = "drme-bit/foundry@=0.2.0"
 ```
 
 Run `wally install` and map the generated `Packages` directory into ReplicatedStorage
 with Rojo. The dependencies resolve through Wally's package-local aliases.
-This checkout targets version 0.1.0; registry publication is a separate step.
+This checkout targets version 0.2.0; registry publication is a separate step.
 
 For source development or a standalone model:
 
@@ -123,5 +118,34 @@ with test doubles; these checks do not replace a Roblox Studio playtest.
 ## License and dependencies
 
 See [LICENCE](LICENCE) for Foundry's existing license and credit terms.
-`t` and Trove retain their own licenses; see
+`t`, Trove and SwiftPacket retain their own licenses; see
 [third-party notices](THIRD_PARTY_NOTICES.md).
+
+
+## Automatic networking
+
+Declare the same ordered contracts on both peers:
+
+```luau
+Network = {
+    Contracts = require(Shared.Network.Contracts),
+}
+```
+
+Foundry loads its bundled SwiftPacket lazily when creating Network and compiles
+contracts into packets. Application code does not create RemoteEvents or a custom
+adapter. SwiftPacket owns the underlying reliable/unreliable remotes and batching.
+Custom CreateAdapter and explicit Library/PacketsBinding overrides remain supported.
+
+Identical definitions reuse packet objects within one SwiftPacket runtime;
+conflicting schemas/policies for the same packet name are rejected. Context
+shutdown disconnects its handlers; the underlying SwiftPacket runtime is shared
+for the lifetime of the engine environment.
+
+## Persistence
+
+Opt into managed DataStore profiles with automatic structural schema identities,
+compatible default reconciliation, session leases, ordered/idempotent retries and
+autosave/shutdown cleanup. No developer-maintained version numbers are required.
+See [Persistence](docs/persistence.md) for configuration, injected stores, failure
+semantics and portable tests.
