@@ -296,7 +296,7 @@ return function(Foundry)
 		instance:Send("Result", table.pack("ok"), "peer")
 		assert(records.Target[1] == "peer" and records.Target[2] == "ok")
 	end
-	cases["Boot auto configures optional modules and feature contracts with cleanup"] = function()
+	cases["Boot auto configures optional modules and module contracts with cleanup"] = function()
 		local pulse, stamp, called = signal(), 0, 0
 		local wire = adapter()
 		local app = Foundry.Boot({
@@ -312,9 +312,9 @@ return function(Foundry)
 					return wire
 				end,
 			},
-			Features = {
+			Modules = {
 				{
-					Name = "Feature",
+					Name = "Module",
 					Contracts = { { Name = "Command", ReceiveOn = "Server", Fields = {} } },
 					Providers = {
 						{
@@ -346,6 +346,34 @@ return function(Foundry)
 		stamp = 2
 		pulse:Fire()
 		assert(called == 1)
+	end
+	cases["sidewatcher records one-second heartbeats without entering the bean graph"] = function()
+		local pulse, stamp, records = signal(), 0, {}
+		local logger = Foundry.Logger.new("Test", {
+			Level = "INFO",
+			Sink = function(record)
+				table.insert(records, record)
+			end,
+		})
+		local app = Foundry.Boot({
+			Logger = logger,
+			Scheduler = { Pulse = pulse },
+			Clock = function()
+				return stamp
+			end,
+		})
+		app:Start()
+		assert(app:Get("Sidewatcher"):GetSnapshot().Ticks == 0)
+		stamp = 1
+		pulse:Fire()
+		local snapshot = app:Get("Sidewatcher"):GetSnapshot()
+		assert(snapshot.Ticks == 1 and snapshot.Failures == 0)
+		assert(app:GetStatus().Alive == 1 and app:GetStatus().Beans.Sidewatcher == nil and app:Get("Sidewatcher") ~= nil)
+		assert(records[#records].Message == "Sidewatcher heartbeat")
+		app:Destroy()
+		stamp = 2
+		pulse:Fire()
+		assert(snapshot.Ticks == 1)
 	end
 	cases["completed jobs release their indexed owner entries"] = function()
 		local active = {}

@@ -36,6 +36,7 @@ function Infrastructure.Register(self: any, options: any, register: any)
 	if options.Scheduler then
 		local config = table.clone(options.Scheduler)
 		config.Clock = config.Clock or options.Clock
+		config.Pulse = config.Pulse or (options.Platform and options.Platform.Heartbeat)
 		config.Logger = config.Logger or self._context:GetLogger()
 		config.CanRun = function()
 			return self._ready and self:GetState() == "Running"
@@ -61,8 +62,8 @@ function Infrastructure.Register(self: any, options: any, register: any)
 		for _, definition in config.Contracts or {} do
 			table.insert(contracts, Contract.new(definition))
 		end
-		for _, feature in options.Features or {} do
-			for _, definition in feature.Contracts or {} do
+		for _, module in options.Modules or {} do
+			for _, definition in module.Contracts or {} do
 				table.insert(contracts, Contract.new(definition))
 			end
 		end

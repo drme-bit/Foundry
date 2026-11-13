@@ -2,7 +2,7 @@
 local Persistence = require("../Persistence/Manager")
 local Dependencies = require("../Roblox/Dependencies")
 local ApplicationContext = require("./Container")
-local Feature = require("./Feature")
+local Module = require("./Module")
 local Scheduler = require("../Tasks/Scheduler")
 local Contract = require("../Network/Contract")
 local Infrastructure = require("./Infrastructure")
@@ -10,6 +10,7 @@ local Registry = require("../Players/Registry")
 local ServerInfo = require("../Server/Info")
 local Validation = require("../Utility/Validation")
 local Inspector = require("../Diagnostics/Inspector")
+local Sidewatcher = require("../Diagnostics/Sidewatcher")
 type NetworkOptions = {
 	Side: string?,
 	Contracts: { Contract.Definition }?,
@@ -20,7 +21,11 @@ type NetworkOptions = {
 	Inject: { [string]: string }?,
 	PeersRemoving: any?,
 }
-export type ShutdownOptions = { Bind: (() -> ()) -> () }
+export type ShutdownOptions = {
+	Bind: (() -> ()) -> (),
+	Before: ((any) -> ())?,
+	After: ((any, { string }) -> ())?,
+}
 export type Options = {
 	Persistence: Persistence.Options?,
 	Shutdown: ShutdownOptions?,
@@ -34,7 +39,7 @@ export type Options = {
 	Network: NetworkOptions?,
 	Inspector: { Enabled: boolean?, Render: ((any, any, any) -> ())? }?,
 	Name: string?,
-	Features: { Feature.Definition }?,
+	Modules: { Module.Definition }?,
 	Providers: { ApplicationContext.Definition }?,
 	Values: { [string]: any }?,
 	Config: any?,
@@ -53,20 +58,41 @@ type Data = {
 	_config: any,
 	_schema: Validation.Check?,
 	_context: ApplicationContext.ApplicationContext,
-	_features: { Feature.Definition },
+	_modules: { Module.Definition },
 	_bindings: { [string]: { Owner: string?, Dependencies: { string } } },
 	_exports: { [string]: boolean },
 	_started: boolean,
 	_ready: boolean,
 	_validationError: string?,
+	_sidewatcher: Sidewatcher.Sidewatcher?,
+	_watcherScheduler: Scheduler.Scheduler?,
+	_watcherOptions: Scheduler.Options,
+	_watcherClock: (() -> number)?,
+	_watcherPulse: any?,
+	_shutdownBefore: ((any) -> ())?,
+	_shutdownAfter: ((any, { string }) -> ())?,
+	_clock: () -> number,
+	_startupStarted: number?,
+	_startupFinished: number?,
+	_shutdownComplete: boolean,
 }
 local Boot = {}
 Boot.__index = Boot
 export type Application = typeof(setmetatable({} :: Data, Boot))
 
+local function clock(self: Application): number
+	local ok, value = pcall(self._clock)
+	return if ok
+			and type(value) == "number"
+			and value == value
+			and math.abs(value) < math.huge
+		then value
+		else os.clock()
+end
+
 local function register(self: Application, definition: ApplicationContext.Definition, owner: string?)
 	local owned = table.clone(definition)
-	owned.Feature = owner
+	owned.Module = owner
 	self._context:Register(owned)
 	local dependencies = table.clone(definition.Dependencies or {})
 	for _, name in definition.Inject or {} do
@@ -100,6 +126,8 @@ function Boot.new(supplied: Options?): Application
 	assert(side == "Shared" or side == "Server" or side == "Client", "Invalid context Side")
 	assert(not options.Shutdown or side == "Server", "Shutdown is a server-only option")
 	assert(not options.Shutdown or type(options.Shutdown.Bind) == "function", "Shutdown.Bind must be a function")
+	assert(not options.Shutdown or options.Shutdown.Before == nil or type(options.Shutdown.Before) == "function", "Shutdown.Before must be a function")
+	assert(not options.Shutdown or options.Shutdown.After == nil or type(options.Shutdown.After) == "function", "Shutdown.After must be a function")
 	local self = setmetatable({
 		_bindShutdown = if options.Shutdown then options.Shutdown.Bind else nil,
 		_shutdownTarget = nil,
@@ -107,12 +135,25 @@ function Boot.new(supplied: Options?): Application
 		_config = options.Config,
 		_schema = options.ConfigSchema,
 		_context = ApplicationContext.new(options),
-		_features = {},
+		_modules = {},
 		_bindings = {},
 		_exports = {},
 		_started = false,
 		_ready = false,
 		_validationError = nil,
+		_sidewatcher = nil,
+		_watcherScheduler = nil,
+		_watcherOptions = table.clone(options.Scheduler or {}),
+		_watcherClock = options.Clock,
+		_watcherPulse = if options.Scheduler and options.Scheduler.Pulse
+			then options.Scheduler.Pulse
+			else (options.Platform and options.Platform.Heartbeat),
+		_shutdownBefore = if options.Shutdown then options.Shutdown.Before else nil,
+		_shutdownAfter = if options.Shutdown then options.Shutdown.After else nil,
+		_clock = options.Clock or os.clock,
+		_startupStarted = nil,
+		_startupFinished = nil,
+		_shutdownComplete = false,
 	}, Boot) :: Application
 	assert(
 		(not options.Players and not options.Server) or side == "Server",
@@ -126,14 +167,14 @@ function Boot.new(supplied: Options?): Application
 	for _, definition in options.Providers or {} do
 		register(self, definition, nil)
 	end
-	for _, descriptor in options.Features or {} do
-		local feature = Feature.new(descriptor)
-		table.insert(self._features, feature)
-		values(self, feature.Values or {}, feature.Name)
-		for _, definition in feature.Providers or {} do
-			register(self, definition, feature.Name)
+	for _, descriptor in options.Modules or {} do
+		local module = Module.new(descriptor)
+		table.insert(self._modules, module)
+		values(self, module.Values or {}, module.Name)
+		for _, definition in module.Providers or {} do
+			register(self, definition, module.Name)
 		end
-		for _, name in feature.Exports or {} do
+		for _, name in module.Exports or {} do
 			self._exports[name] = true
 		end
 	end
@@ -155,8 +196,9 @@ end
 function Boot.Start(self: Application): Application
 	assert(not self._started, "A Foundry application can start only once")
 	self._started = true
+	self._startupStarted = clock(self)
 	local ok, message = pcall(function()
-		Feature.Validate(self._features, self._bindings, self._side)
+		Module.Validate(self._modules, self._bindings, self._side)
 		if self._schema then
 			local valid, reason = Validation.Check(self._schema, self._config)
 			assert(valid, `Config validation failed: {reason}`)
@@ -165,10 +207,23 @@ function Boot.Start(self: Application): Application
 	if not ok then
 		self._validationError = tostring(message)
 		self._context:ReportValidationFailure(tostring(message))
+		self._startupFinished = clock(self)
 		error(message, 0)
 	end
 	self._context:Run()
+	self._startupFinished = clock(self)
 	self._ready = true
+	local watcherOptions = table.clone(self._watcherOptions)
+	watcherOptions.Clock = watcherOptions.Clock or self._watcherClock
+	watcherOptions.Pulse = watcherOptions.Pulse or self._watcherPulse
+	watcherOptions.Logger = watcherOptions.Logger or self:GetLogger()
+	watcherOptions.CanRun = function()
+		return self._ready and self:GetState() == "Running"
+	end
+	self._watcherScheduler = Scheduler.new(watcherOptions)
+	local watcher = Sidewatcher.new(self, self._watcherScheduler, self:GetLogger())
+	self._sidewatcher = watcher
+	watcher:Start()
 	local bind = self._bindShutdown
 	self._bindShutdown = nil
 	if bind then
@@ -193,8 +248,12 @@ end
 Boot.Run = Boot.Start
 
 function Boot.Get(self: Application, name: string): any
+	if name == "Sidewatcher" then
+		assert(self._sidewatcher, "Sidewatcher is available only after Start")
+		return self._sidewatcher
+	end
 	local binding = self._bindings[name]
-	assert(not binding or not binding.Owner or self._exports[name], `Private feature binding: {name}`)
+	assert(not binding or not binding.Owner or self._exports[name], `Private module binding: {name}`)
 	return self._context:Get(name)
 end
 function Boot.GetSide(self: Application): string
@@ -210,7 +269,7 @@ end
 function Boot.GetGraph(self: Application): { any }
 	local nodes = {}
 	for name, binding in self._bindings do
-		table.insert(nodes, { Name = name, Feature = binding.Owner, Dependencies = table.clone(binding.Dependencies) })
+		table.insert(nodes, { Name = name, Module = binding.Owner, Dependencies = table.clone(binding.Dependencies) })
 	end
 	table.sort(nodes, function(a: any, b: any)
 		return a.Name < b.Name
@@ -221,6 +280,61 @@ function Boot.Inspect(self: Application): any
 	return Inspector.new(self):GetSnapshot()
 end
 
+function Boot.GetHealth(self: Application): any
+	local state = self:GetState()
+	local status = self:GetStatus()
+	local result = {
+		Status = if state == "Running"
+			then if status.Failed + status.Skipped + status.RuntimeFailures > 0 then "Degraded" else "Ready"
+			elseif state == "Stopped" then "Stopped"
+			elseif state == "Failed" then "Failed"
+			else "Starting",
+		State = state,
+		Reason = nil,
+		Beans = {},
+	}
+	for name, bean in status.Beans do
+		local health = {
+			Status = if bean.State == "Running" then "Ready" else bean.State,
+			Reason = bean.Reason,
+		}
+		local ok, instance = pcall(function()
+			return self._context:Get(name)
+		end)
+		if ok and type(instance.Health) == "function" then
+			local healthy, value = pcall(instance.Health, instance)
+			if healthy and type(value) == "table" then
+				health = table.clone(value)
+			elseif not healthy then
+				health.Status, health.Reason = "Degraded", tostring(value)
+			end
+		end
+		result.Beans[name] = health
+	end
+	return result
+end
+
+function Boot.GetStartupReport(self: Application): any
+	local status = self:GetStatus()
+	local slowest = {}
+	for name, bean in status.Beans do
+		local duration = (bean.CreateDuration or 0) + (bean.InitDuration or 0) + (bean.StartDuration or 0)
+		table.insert(slowest, { Name = name, Duration = duration, Module = bean.Module })
+	end
+	table.sort(slowest, function(a: any, b: any)
+		return a.Duration > b.Duration
+	end)
+	return {
+		StartedAt = self._startupStarted,
+		FinishedAt = self._startupFinished,
+		Duration = if self._startupStarted and self._startupFinished
+			then math.max(0, self._startupFinished - self._startupStarted)
+			else nil,
+		Status = status,
+		Slowest = slowest,
+	}
+end
+
 function Boot.GetHistory(self: Application): { any }
 	return self._context:GetHistory()
 end
@@ -229,7 +343,7 @@ function Boot.GetLogger(self: Application): any
 end
 function Boot.Execute(self: Application, name: string, operation: string, callback: any, ...: any): (boolean, ...any)
 	local binding = self._bindings[name]
-	assert(not binding or not binding.Owner or self._exports[name], `Private feature binding: {name}`)
+	assert(not binding or not binding.Owner or self._exports[name], `Private module binding: {name}`)
 	return self._context:Execute(name, operation, callback, ...)
 end
 
@@ -237,13 +351,42 @@ function Boot.RetryFailed(self: Application): any
 	return self._context:RetryFailed()
 end
 function Boot.Destroy(self: Application): { string }
-	local errors = self._context:Destroy()
+	if self._shutdownComplete then
+		return {}
+	end
+	local errors = {}
+	local before = self._shutdownBefore
+	if before then
+		local ok, reason = pcall(before, self)
+		if not ok then
+			table.insert(errors, `Shutdown.Before: {tostring(reason)}`)
+		end
+	end
+	if self._sidewatcher then
+		self._sidewatcher:Destroy()
+		self._sidewatcher = nil
+	end
+	if self._watcherScheduler then
+		self._watcherScheduler:Destroy()
+		self._watcherScheduler = nil
+	end
+	for _, message in self._context:Destroy() do
+		table.insert(errors, message)
+	end
+	local after = self._shutdownAfter
+	if after then
+		local ok, reason = pcall(after, self, errors)
+		if not ok then
+			table.insert(errors, `Shutdown.After: {tostring(reason)}`)
+		end
+	end
 	self._ready = false
 	self._bindShutdown = nil
 	if self._shutdownTarget then
 		self._shutdownTarget.Application = nil
 		self._shutdownTarget = nil
 	end
+	self._shutdownComplete = true
 	return errors
 end
 return Boot

@@ -18,7 +18,15 @@ function Inspector.GetSnapshot(self: any): any
 		Status = app:GetStatus(),
 		Graph = app:GetGraph(),
 		History = app:GetHistory(),
+		Health = app:GetHealth(),
+		Startup = app:GetStartupReport(),
 	}
+	local okWatcher, watcher = pcall(function()
+		return app:Get("Sidewatcher")
+	end)
+	if okWatcher and type(watcher.GetSnapshot) == "function" then
+		result.Sidewatcher = (watcher.GetSnapshot :: (any) -> any)(watcher)
+	end
 	for _, name in { "Scheduler", "Network", "PlayerRegistry", "ServerInfo", "Persistence" } do
 		local ok, instance = pcall(function()
 			return app:Get(name)

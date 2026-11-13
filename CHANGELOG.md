@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — in development
+## 0.1.1 — in development
 
 - Add server Persistence and injectable named stores without manual data versions.
 - Derive schema identities from defaults, reconcile compatible additions and support explicit top-level aliases.

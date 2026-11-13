@@ -14,7 +14,7 @@ export type Definition = {
 	Dependencies: { string }?,
 	Inject: { [string]: string }?,
 	Create: (dependencies: { [string]: any }, scope: Scope, runtime: Runtime.Runtime) -> any,
-	Feature: string?,
+	Module: string?,
 }
 export type LogPort = { Debug: (any, string) -> (), Info: (any, string) -> (), Error: (any, string) -> () }
 export type Options = {
@@ -163,11 +163,11 @@ function ApplicationContext.Register(self: ApplicationContext, definition: Defin
 		Dependencies = table.freeze(dependencies),
 		Inject = inject,
 		Create = definition.Create,
-		Feature = definition.Feature,
+		Module = definition.Module,
 	}
 
 	table.insert(self._names, definition.Name)
-	event(self, { Event = "Registered", Bean = definition.Name, Feature = definition.Feature })
+	event(self, { Event = "Registered", Bean = definition.Name, Module = definition.Module })
 	return self
 end
 
@@ -341,7 +341,7 @@ local function execute(self: ApplicationContext, order: { string }, selected: { 
 		self._statuses[name] = {
 			State = "Pending",
 			Attempts = if previous then previous.Attempts or 0 else 0,
-			Feature = self._definitions[name].Feature,
+			Module = self._definitions[name].Module,
 		}
 		event(self, { Event = "Pending", Bean = name })
 	end
@@ -368,7 +368,7 @@ local function execute(self: ApplicationContext, order: { string }, selected: { 
 				Attempts = if previous then previous.Attempts or 0 else 0,
 				CleanupFailed = previous and previous.CleanupFailed,
 				CleanupError = previous and previous.CleanupError,
-				Feature = self._definitions[candidate].Feature,
+				Module = self._definitions[candidate].Module,
 				CreateDuration = previous and previous.CreateDuration,
 				InitDuration = previous and previous.InitDuration,
 				StartDuration = previous and previous.StartDuration,
@@ -392,7 +392,7 @@ local function execute(self: ApplicationContext, order: { string }, selected: { 
 			self,
 			"Error",
 			`{name}.{phase} failed: {message}`,
-			{ Bean = name, Stage = phase, Feature = self._definitions[name].Feature }
+			{ Bean = name, Stage = phase, Module = self._definitions[name].Module }
 		)
 	end
 	for _, phase in { "Create", "Init", "Start" } do
@@ -427,7 +427,7 @@ local function execute(self: ApplicationContext, order: { string }, selected: { 
 				Event = "LoadStarted",
 				Bean = name,
 				Stage = phase,
-				Feature = self._definitions[name].Feature,
+				Module = self._definitions[name].Module,
 			})
 			local ok, message = xpcall(function(): any
 				if phase == "Create" then
@@ -459,7 +459,7 @@ local function execute(self: ApplicationContext, order: { string }, selected: { 
 					end, function()
 						return now(self)
 					end, function(record)
-						record.Bean, record.Feature, record.Attempt = name, definition.Feature, status.Attempts
+						record.Bean, record.Module, record.Attempt = name, definition.Module, status.Attempts
 						if entry.Alive then
 							local current = self._statuses[name]
 							if record.Event == "ExecutionFailed" then
@@ -500,7 +500,7 @@ local function execute(self: ApplicationContext, order: { string }, selected: { 
 			event(self, {
 				Event = if ok then "LoadSucceeded" else "LoadFailed",
 				Bean = name,
-				Feature = self._definitions[name].Feature,
+				Module = self._definitions[name].Module,
 				Stage = phase,
 				Duration = elapsed,
 				Reason = if ok then nil else tostring(message),
@@ -513,7 +513,7 @@ local function execute(self: ApplicationContext, order: { string }, selected: { 
 				log(self, "Debug", `{name}.{phase} completed`, {
 					Duration = elapsed,
 					Attempt = status.Attempts,
-					Feature = self._definitions[name].Feature,
+					Module = self._definitions[name].Module,
 				})
 			else
 				fail(name, phase, tostring(message))

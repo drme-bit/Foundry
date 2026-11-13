@@ -5,10 +5,10 @@ return function(Foundry)
 		local ok, message = pcall(callback)
 		assert(not ok and tostring(message):find(text, 1, true), tostring(message))
 	end
-	cases["Boot runs features out of order, keeps internals private and tears down dependents first"] = function()
+	cases["Boot runs modules out of order, keeps internals private and tears down dependents first"] = function()
 		local destroyed = {}
 		local app = Foundry.Boot({
-			Features = {
+			Modules = {
 				{
 					Name = "Orders",
 					Imports = { "Player" },
@@ -58,21 +58,21 @@ return function(Foundry)
 		assert(app:Get("Orders").Wallet == app:Get("Wallet"))
 		fails(function()
 			app:Get("Internal")
-		end, "Private feature binding")
+		end, "Private module binding")
 		app:Destroy()
 		assert(table.concat(destroyed, ",") == "Orders,Wallet")
 	end
-	cases["feature validation fails before all factories"] = function()
+	cases["module validation fails before all factories"] = function()
 		local invalid = {
 			{ { Name = "A", Imports = { "Missing" } } },
 			{ { Name = "A", Imports = { "B" } }, { Name = "B", Imports = { "A" } } },
 			{ { Name = "A", Exports = { "Missing" } } },
 			{ { Name = "A" }, { Name = "A" } },
 		}
-		for _, features in invalid do
+		for _, modules in invalid do
 			local created = false
 			local app = Foundry.Boot({
-				Features = features,
+				Modules = modules,
 				Providers = {
 					{
 						Name = "Root",
@@ -106,17 +106,17 @@ return function(Foundry)
 						return {}
 					end,
 				}
-				local features = {
+				local modules = {
 					{
-						Name = "SourceFeature",
+						Name = "SourceModule",
 						Values = { Source = {} },
 						Exports = if exported then { "Source" } else {},
 					},
 				}
 				if not fromRoot then
-					table.insert(features, { Name = "ConsumerFeature", Providers = { consumer } })
+					table.insert(modules, { Name = "ConsumerModule", Providers = { consumer } })
 				end
-				local app = Foundry.Boot({ Features = features, Providers = if fromRoot then { consumer } else {} })
+				local app = Foundry.Boot({ Modules = modules, Providers = if fromRoot then { consumer } else {} })
 				if fromRoot and exported then
 					app:Start()
 					assert(created)
@@ -131,11 +131,11 @@ return function(Foundry)
 	end
 	cases["descriptors snapshot metadata and borrow values"] = function()
 		local external = {}
-		local descriptor = { Name = "Feature", Values = { Token = external }, Exports = { "Token" } }
-		local snapshot = Foundry.Feature(descriptor)
+		local descriptor = { Name = "Module", Values = { Token = external }, Exports = { "Token" } }
+		local snapshot = Foundry.Module(descriptor)
 		assert(table.isfrozen(snapshot) and table.isfrozen(snapshot.Exports))
 		descriptor.Exports[1], descriptor.Values.Token = "Other", {}
-		local app = Foundry.Boot({ Features = { snapshot } })
+		local app = Foundry.Boot({ Modules = { snapshot } })
 		app:Start()
 		assert(app:Get("Token") == external)
 		app:Destroy()
@@ -143,7 +143,7 @@ return function(Foundry)
 	cases["default scope releases partial factories and retries without rebuilding healthy branches"] = function()
 		local attempts, cleaned, healthy, healthyCleaned = 0, 0, 0, 0
 		local app = Foundry.Boot({
-			Features = {
+			Modules = {
 				{
 					Name = "Retry",
 					Exports = { "Unstable" },
@@ -203,6 +203,67 @@ return function(Foundry)
 		end, "before Start")
 		app:Destroy()
 		assert(app:GetState() == "Stopped")
+	end
+	cases["builder composes explicit providers, modules and infrastructure"] = function()
+		local app = Foundry.Configure({
+			Name = "BuilderTest",
+			Platform = {
+				IsServer = function()
+					return true
+				end,
+				IsClient = function()
+					return false
+				end,
+			},
+		})
+			:Use("Scheduler")
+			:Value("Port", 4)
+			:Provider({
+				Name = "Root",
+				Inject = { Port = "Port" },
+				Create = function(dependencies)
+					assert(dependencies.Port == 4)
+					return {}
+				end,
+			})
+			:Module({
+				Name = "Module",
+				Providers = {
+					{
+						Name = "Owned",
+						Create = function()
+							return {}
+						end,
+					},
+				},
+			})
+			:Start()
+		assert(app:Get("Root") and app:Get("Sidewatcher"))
+		app:Destroy()
+	end
+	cases["health and startup reports expose provider readiness and timing"] = function()
+		local app = Foundry.Boot({
+			Clock = function()
+				return 10
+			end,
+			Providers = {
+				{
+					Name = "Healthy",
+					Create = function()
+						return {
+							Health = function()
+								return { Status = "Ready", Detail = "connected" }
+							end,
+						}
+					end,
+				},
+			},
+		}):Start()
+		local health = app:GetHealth()
+		local report = app:GetStartupReport()
+		assert(health.Status == "Ready" and health.Beans.Healthy.Detail == "connected")
+		assert(report.Duration == 0 and report.Slowest[1].Name == "Healthy")
+		app:Destroy()
 	end
 	cases["missing provider and bean cycles still fail before side effects"] = function()
 		for _, cycle in { false, true } do

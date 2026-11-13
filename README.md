@@ -1,7 +1,7 @@
 # Foundry
 
 Application lifecycle and runtime infrastructure for Roblox, with explicit dependency
-injection, feature boundaries, cleanup, diagnostics, networking and player sessions.
+injection, module boundaries, cleanup, diagnostics, networking and player sessions.
 
 [Getting started](docs/getting-started.md) · [API reference](docs/api.md) ·
 [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md)
@@ -84,7 +84,7 @@ The context manages beans, their dependency graph and lifecycle. Player lookup
 belongs to `PlayerRegistry`, and server metadata belongs to `ServerInfo`.
 Player sessions are not individual beans in the application context.
 
-Server and client applications are separate runtimes. Shared feature code is not
+Server and client applications are separate runtimes. Shared module code is not
 automatically replicated state, and a server context does not execute client code.
 
 ## Included infrastructure
@@ -92,7 +92,7 @@ automatically replicated state, and a server context does not execute client cod
 | Module | Purpose |
 | --- | --- |
 | Context | Bean registration, dependency order, lifecycle and bounded startup retries |
-| Features | Explicit imports, exports and private bindings |
+| Modules | Explicit imports, exports and private bindings |
 | Scope / Trove | Owned resources and cleanup |
 | Runtime | Protected operations and failure-limited callbacks |
 | Logger / Inspector | Structured logs, history and detached runtime snapshots |

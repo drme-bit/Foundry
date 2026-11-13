@@ -1,5 +1,5 @@
 --!strict
--- Immutable feature manifests and dependency visibility checks. No module scanning.
+-- Immutable module manifests and dependency visibility checks. No module scanning.
 local Context = require("./Container")
 local Contract = require("../Network/Contract")
 
@@ -18,7 +18,7 @@ export type Definition = {
 	Exports: { string }?,
 }
 
-local Feature = {}
+local Module = {}
 
 local function names(list: { string }?): { string }
 	local result, seen = {}, {}
@@ -31,10 +31,10 @@ local function names(list: { string }?): { string }
 	return table.freeze(result)
 end
 
-function Feature.new(definition: Definition): Definition
-	assert(type(definition.Name) == "string" and #definition.Name > 0, "Feature needs a Name")
+function Module.new(definition: Definition): Definition
+	assert(type(definition.Name) == "string" and #definition.Name > 0, "Module needs a Name")
 	local side = definition.Side or "Shared"
-	assert(side == "Shared" or side == "Server" or side == "Client", "Invalid feature Side")
+	assert(side == "Shared" or side == "Server" or side == "Client", "Invalid module Side")
 	local providers: { Context.Definition } = {}
 	for _, provider in definition.Providers or {} do
 		local copy = table.clone(provider)
@@ -62,33 +62,33 @@ function Feature.new(definition: Definition): Definition
 	return table.freeze(snapshot) :: Definition
 end
 
-function Feature.Validate(features: { Definition }, bindings: { [string]: Binding }, side: string?)
+function Module.Validate(modules: { Definition }, bindings: { [string]: Binding }, side: string?)
 	local byName: { [string]: Definition } = {}
 	local exports: { [string]: { [string]: boolean } } = {}
 	local imports: { [string]: { [string]: boolean } } = {}
-	for _, feature in features do
+	for _, module in modules do
 		assert(
-			not side or side == "Shared" or feature.Side == "Shared" or feature.Side == nil or feature.Side == side,
-			`Feature {feature.Name} belongs to {feature.Side}, not {side}`
+			not side or side == "Shared" or module.Side == "Shared" or module.Side == nil or module.Side == side,
+			`Module {module.Name} belongs to {module.Side}, not {side}`
 		)
-		assert(not byName[feature.Name], `Duplicate feature: {feature.Name}`)
-		byName[feature.Name], exports[feature.Name], imports[feature.Name] = feature, {}, {}
-		for _, name in feature.Exports or {} do
+		assert(not byName[module.Name], `Duplicate module: {module.Name}`)
+		byName[module.Name], exports[module.Name], imports[module.Name] = module, {}, {}
+		for _, name in module.Exports or {} do
 			assert(
-				bindings[name] and bindings[name].Owner == feature.Name,
-				`Feature {feature.Name} cannot export unknown or foreign binding: {name}`
+				bindings[name] and bindings[name].Owner == module.Name,
+				`Module {module.Name} cannot export unknown or foreign binding: {name}`
 			)
-			exports[feature.Name][name] = true
+			exports[module.Name][name] = true
 		end
-		for _, name in feature.Imports or {} do
-			imports[feature.Name][name] = true
+		for _, name in module.Imports or {} do
+			imports[module.Name][name] = true
 		end
 	end
 	local visiting, visited = {}, {}
 	local path: { string } = {}
 	local function visit(name: string)
-		assert(byName[name], `Missing feature: {name}`)
-		assert(not visiting[name], `Feature cycle: {table.concat(path, " -> ")} -> {name}`)
+		assert(byName[name], `Missing module: {name}`)
+		assert(not visiting[name], `Module cycle: {table.concat(path, " -> ")} -> {name}`)
 		if visited[name] then
 			return
 		end
@@ -100,8 +100,8 @@ function Feature.Validate(features: { Definition }, bindings: { [string]: Bindin
 		table.remove(path)
 		visiting[name], visited[name] = nil, true
 	end
-	for _, feature in features do
-		visit(feature.Name)
+	for _, module in modules do
+		visit(module.Name)
 	end
 	for name, binding in bindings do
 		for _, dependency in binding.Dependencies do
@@ -113,11 +113,11 @@ function Feature.Validate(features: { Definition }, bindings: { [string]: Bindin
 				)
 				assert(
 					not binding.Owner or imports[binding.Owner][provider.Owner],
-					`Feature {binding.Owner} must import {provider.Owner} to inject {dependency}`
+					`Module {binding.Owner} must import {provider.Owner} to inject {dependency}`
 				)
 			end
 		end
 	end
 end
 
-return Feature
+return Module

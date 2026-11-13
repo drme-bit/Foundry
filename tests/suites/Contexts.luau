@@ -122,10 +122,10 @@ return function(Foundry, t)
 		a:Destroy()
 		b:Destroy()
 	end
-	cases["wrong-side features fail before provider factories and expose failed state"] = function()
+	cases["wrong-side modules fail before provider factories and expose failed state"] = function()
 		local creates = 0
 		local app = Foundry:ClientContext({
-			Features = {
+			Modules = {
 				{
 					Name = "Secret",
 					Side = "Server",
@@ -146,7 +146,7 @@ return function(Foundry, t)
 		end, "belongs to Server")
 		assert(creates == 0 and app:GetState() == "Failed")
 		app:Destroy()
-		local shared = Foundry:ServerContext({ Features = { { Name = "Common" } } })
+		local shared = Foundry:ServerContext({ Modules = { { Name = "Common" } } })
 		shared:Start()
 		shared:Destroy()
 	end

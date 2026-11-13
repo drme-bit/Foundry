@@ -70,9 +70,9 @@ return function(Foundry)
 				tick += 0.1
 				return tick
 			end,
-			Features = {
+			Modules = {
 				{
-					Name = "Feature",
+					Name = "Module",
 					Exports = { "A" },
 					Providers = {
 						{
@@ -87,7 +87,7 @@ return function(Foundry)
 		})
 		app:Start()
 		local first, again = app:GetStatus(), app:GetStatus()
-		assert(first.Revision == again.Revision and first.Beans.A.Feature == "Feature")
+		assert(first.Revision == again.Revision and first.Beans.A.Module == "Module")
 		assert(first.Beans.A.CreateDuration > 0 and first.Beans.A.InitDuration > 0)
 		first.Beans.A.State = "Corrupted"
 		first.Alive = 20
@@ -212,7 +212,7 @@ return function(Foundry)
 	end
 	cases["validation failures use the same journal and logger"] = function()
 		local logger = silent()
-		local app = Foundry.Boot({ Logger = logger, Features = { { Name = "A", Imports = { "Missing" } } } })
+		local app = Foundry.Boot({ Logger = logger, Modules = { { Name = "A", Imports = { "Missing" } } } })
 		assert(not pcall(function()
 			app:Start()
 		end))
@@ -224,9 +224,9 @@ return function(Foundry)
 	cases["private bindings cannot be accessed through execution"] = function()
 		local app = Foundry.Boot({
 			Logger = silent(),
-			Features = {
+			Modules = {
 				{
-					Name = "Feature",
+					Name = "Module",
 					Providers = {
 						{
 							Name = "Private",

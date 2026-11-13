@@ -159,5 +159,47 @@ return function(F)
 		assert(bound == 1)
 		app:Destroy()
 	end
+	cases["shutdown hooks run around cleanup and collect hook failures"] = function()
+		local order = {}
+		local app = F:ServerContext({
+			Shutdown = {
+				Bind = function() end,
+				Before = function()
+					table.insert(order, "Before")
+				end,
+				After = function(_, errors)
+					assert(#errors == 0)
+					table.insert(order, "After")
+				end,
+			},
+			Providers = {
+				{
+					Name = "Owned",
+					Create = function()
+						return {
+							Destroy = function()
+								table.insert(order, "Destroy")
+							end,
+						}
+					end,
+				},
+			},
+		}):Start()
+		app:Destroy()
+		assert(table.concat(order, ",") == "Before,Destroy,After")
+		local broken = F:ServerContext({
+			Shutdown = {
+				Bind = function() end,
+				Before = function()
+					error("before failed")
+				end,
+				After = function()
+					error("after failed")
+				end,
+			},
+		}):Start()
+		local errors = broken:Destroy()
+		assert(#errors == 2 and errors[1]:find("Shutdown.Before", 1, true) and errors[2]:find("Shutdown.After", 1, true))
+	end
 	return cases
 end

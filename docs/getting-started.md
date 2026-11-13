@@ -70,6 +70,41 @@ On the server it registers one BindToClose callback after startup;
 you do not need a second manual BindToClose. You can still call app:Destroy yourself.
 The hook does not cover a shutdown that occurs before startup finishes.
 
+For the common case, the fluent builder removes repeated table assembly while
+keeping providers and modules explicit:
+
+```luau
+local app = Foundry.Configure({ Name = "MyGame/Server" })
+    :Use("Players", { Source = game:GetService("Players") })
+    :Use("Scheduler")
+    :Provider({
+        Name = "Orders",
+        Inject = { Rules = "OrderRules" },
+        Create = function(deps, scope, runtime)
+            return Orders.new(deps.Rules, scope, runtime)
+        end,
+    })
+    :Module(OrdersModule)
+    :Start()
+```
+
+`Configure` uses the same runtime detection as `ApplicationContext`. `Provider`
+and `Module` only append explicit definitions; `Inject` remains the source of
+dependency edges. Use `Options({...})` or `Foundry.Boot({...})` for advanced
+configuration.
+
+The builder also has `Name`, `Logger`, `Config`, `ConfigSchema` and `Shutdown`
+helpers. They only set the corresponding `Boot.Options` values:
+
+```luau
+local app = Foundry.Configure()
+    :Name("MyGame/Server")
+    :Config({ Environment = "Production" })
+    :ConfigSchema(configSchema)
+    :Logger(logger)
+    :Start()
+```
+
 ## Client bootstrap
 
 ```luau

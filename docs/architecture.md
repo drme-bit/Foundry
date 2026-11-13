@@ -7,7 +7,7 @@
 ```text
 src/
   init.luau                 supported public exports
-  Context/                  composition, container, features, infrastructure
+  Context/                  composition, container, modules, infrastructure
   Lifecycle/                ordered scopes and protected execution
   Diagnostics/              logging and Inspector snapshots
   Tasks/                    cooperative scheduling

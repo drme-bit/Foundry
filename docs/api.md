@@ -12,7 +12,7 @@ Target: `drme-bit/foundry@0.2.0`.
 - [Beans and injection](#beans-and-injection)
 - [Application methods](#application-methods)
 - [Startup, retry and shutdown](#startup-retry-and-shutdown)
-- [Features](#features)
+- [Modules](#modules)
 - [Scopes and Trove](#scopes-and-trove)
 - [Validation](#validation)
 - [Runtime](#runtime)
@@ -41,10 +41,12 @@ requiring physical implementation paths. Export tables are frozen.
 | `ServerContext(options?)` | Independent server application |
 | `ClientContext(options?)` | Independent client application |
 | `Boot(options?)` | Lower-level application composition |
-| `Feature(definition)` | Validated, frozen feature manifest snapshot |
+| `Configure(options?)` | Fluent builder for common application composition |
+| `Module(definition)` | Validated, frozen module manifest snapshot |
 | `Scope` | Ordered resource ownership |
 | `Logger` | Structured logging |
 | `Scheduler` | Cooperative task scheduling |
+| `Sidewatcher` | Built-in once-per-second context health watcher |
 | `t` | Bundled type checker in Roblox |
 | `Utility.Trove` | Bundled Trove implementation in Roblox |
 | `Utility.Signal` | Synchronous, failure-isolated notifications |
@@ -64,7 +66,7 @@ Wally dependency aliases, bundled models and source checkouts are supported thro
 the documented layouts. Missing Roblox dependencies raise an installation error.
 Standalone Luau does not automatically load engine-dependent dependencies.
 
-Exported Luau types: Application, Options, Feature, Definition, Scope, ContextScope,
+Exported Luau types: Application, ApplicationBuilder, Options, Module, Definition, Scope, ContextScope,
 Runtime, Logger, Player, PlayerModule, ShutdownOptions, LogPort and ApplicationContext.
 For example: `type App = Foundry.Application`.
 
@@ -84,7 +86,7 @@ explicit Platform port is required; Side cannot override the detected runtime.
 
 Side constructors remain available and support colon and dot calls. Each call creates a separate app;
 there is no global context singleton. Construction does not invoke provider
-factories. Requiring your own feature modules can execute their top-level code.
+factories. Requiring your own module definitions can execute their top-level code.
 
 Side constructors set Side, infer Network.Side and reject conflicting overrides.
 Platform verifies the actual execution side through IsServer/IsClient. Supply
@@ -94,6 +96,29 @@ client modules remotely. Shared code does not imply replicated state.
 Boot defaults to Shared and requires an explicit network side when networking is
 enabled. Server-only options still require Side = "Server".
 
+### Fluent builder
+
+`Foundry.Configure(options?)` returns an `ApplicationBuilder` with the following
+operations:
+
+| Method | Contract |
+| --- | --- |
+| `Name(name)` | Set application name |
+| `Logger(logger)` | Set the structured logger |
+| `Config(value)` | Set borrowed application configuration |
+| `ConfigSchema(schema)` | Validate Config before factories |
+| `Provider(definition)` | Append one explicit root provider |
+| `Module(definition)` | Append one explicit module manifest |
+| `Value(name, value)` | Add one borrowed root value |
+| `Use(name, options?)` | Configure one built-in infrastructure option |
+| `Options(patch)` | Apply advanced options |
+| `Build()` | Construct without starting |
+| `Start()` | Construct and start |
+
+`Use` accepts `Persistence`, `Scheduler`, `Network`, `Inspector`, `Players` and
+`Server`. It rejects duplicate or unknown infrastructure names. The builder is
+single-use and does not discover ModuleScripts automatically.
+
 ## Application options
 
 | Field | Type / default | Contract |
@@ -102,9 +127,9 @@ enabled. Server-only options still require Side = "Server".
 | `Side` | `string?` | Server, Client or Shared; inferred by side constructors |
 | `Platform` | `any?` | Side-check port, normally RunService |
 | `Persistence` | `PersistenceOptions?` | Server-only managed stores; see [Persistence](persistence.md) |
-| `Features` | `{FeatureDefinition}?` | Explicit feature manifests |
+| `Modules` | `{ModuleDefinition}?` | Explicit module manifests |
 | `Providers` | `{Definition}?` | Root beans |
-| `Values` | `{[string]: any}?` | Borrowed values available to features |
+| `Values` | `{[string]: any}?` | Borrowed values available to modules |
 | `Config` | `any?` | Registered as Config when non-nil |
 | `ConfigSchema` | `Check?` | Validate Config before factories |
 | `Types` | `any?` | Override bundled t; useful in portable tests |
@@ -115,7 +140,7 @@ enabled. Server-only options still require Side = "Server".
 | `Wait` | `((number) -> ())?` | Normally task.wait; no delay without this port |
 | `Clock` | `(() -> number)?` | Monotonic seconds, normally os.clock |
 | `HistoryLimit` | integer 0..4096, default 512 | Lifecycle/runtime journal capacity |
-| `Shutdown` | `ShutdownOptions?` | Optional server shutdown binding |
+| `Shutdown` | `ShutdownOptions?` | Optional server binding plus Before/After cleanup hooks |
 | `Scheduler` | `SchedulerOptions?` | Enable bean Scheduler |
 | `Network` | `NetworkOptions?` | Enable bean Network |
 | `Inspector` | `InspectorOptions?` | Enable Inspector when Enabled is true |
@@ -166,13 +191,16 @@ context into a module merely to perform hidden runtime lookups.
 | `RegisterValue(name, value)` | Register a borrowed value before Start; returns app |
 | `Start()` | Validate/run lifecycle; returns app |
 | `Run()` | Alias of Start |
-| `Get(name)` | Resolve a bean/value; reject private feature bindings |
+| `Get(name)` | Resolve a bean/value; reject private module bindings |
 | `GetSide()` | Server, Client or Shared |
 | `GetState()` | New, Starting, Running, Stopping, Stopped or Failed |
 | `GetStatus()` | Detached cached lifecycle snapshot |
-| `GetGraph()` | Sorted array of `{Name, Feature?, Dependencies}` |
+| `GetGraph()` | Sorted array of `{Name, Module?, Dependencies}` |
 | `GetHistory()` | Bounded lifecycle/runtime events |
 | `GetLogger()` | Application logger |
+| `GetHealth()` | Detached context and provider readiness snapshot |
+| `GetStartupReport()` | Startup duration, final status and slowest providers |
+| `Get("Sidewatcher")` | Built-in side health watcher and heartbeat snapshot |
 | `Inspect()` | Aggregate Inspector snapshot; no Inspector bean required |
 | `Execute(name, operation, callback, ...)` | Protected operation, returns `(ok, ...results)` or `(false, reason)` |
 | `RetryFailed()` | One explicit recovery wave while Running; returns status |
@@ -185,8 +213,16 @@ succeeded because Start returned.
 
 Status fields: Started, Alive, Failed, Skipped, Retried, RuntimeFailures, Revision
 and Beans. Beans is keyed by name. Per-bean records may include State, Stage,
-Reason, Attempts, Feature, CreateDuration, InitDuration, StartDuration, RuntimeFailures,
+Reason, Attempts, Module, CreateDuration, InitDuration, StartDuration, RuntimeFailures,
 LastRuntimeError, DisabledGuards and cleanup errors, depending on events reached.
+
+`GetHealth()` returns `Status` (`Starting`, `Ready`, `Degraded`, `Failed` or
+`Stopped`), the context `State`, and per-bean health records. A provider may expose
+`Health(self)` and return a table such as `{ Status = "Degraded", Reason = "..." }`.
+Health callback failures are reported as degraded rather than hidden.
+
+`GetStartupReport()` returns `StartedAt`, `FinishedAt`, `Duration`, the final
+`Status` snapshot and `Slowest`, sorted by total Create/Init/Start duration.
 
 The context has no GetPlayer/GetServerInfo shortcuts:
 
@@ -198,7 +234,7 @@ local server = app:Get("ServerInfo"):GetSnapshot()
 
 ## Startup, retry and shutdown
 
-Startup validates features/configuration and dependency existence/cycles, then
+Startup validates modules/configuration and dependency existence/cycles, then
 runs Create for available beans, Init for created beans, and Start. Dependency
 order applies in every stage. Array order does not replace declared edges.
 
@@ -210,7 +246,11 @@ RetryFailed requests another wave. Gameplay side effects are never automatically
 ### ShutdownOptions
 
 ```luau
-type ShutdownOptions = { Bind: (callback: () -> ()) -> () }
+type ShutdownOptions = {
+    Bind: (callback: () -> ()) -> (),
+    Before: ((application) -> ())?,
+    After: ((application, errors: { string }) -> ())?,
+}
 Shutdown = { Bind = function(callback) game:BindToClose(callback) end }
 ```
 
@@ -222,12 +262,14 @@ Start raises Shutdown.Bind failed. The binder is snapshotted during construction
 Manual Destroy clears the callback's application reference. The engine callback
 cannot be unregistered; later invocations are harmless. Shutdown before startup
 finishes is not covered. The port does not extend Roblox's shutdown deadline or
-guarantee cleanup after a process crash.
+guarantee cleanup after a process crash. `Before` runs before provider cleanup;
+`After` runs after cleanup and receives the collected error strings. Hook failures
+are collected and do not prevent the remaining cleanup.
 
-## Features
+## Modules
 
 ```luau
-Foundry.Feature({
+Foundry.Module({
     Name = "Orders",
     Side = "Server", -- Shared by default
     Imports = { "Wallet" },
@@ -238,17 +280,25 @@ Foundry.Feature({
 })
 ```
 
-Feature returns a validated, frozen manifest snapshot. Boot also snapshots ordinary
+Module returns a validated, frozen manifest snapshot. Boot also snapshots ordinary
 manifest tables, so pre-wrapping them is optional.
 
-- Imports names features, not bindings, and does not load modules automatically.
-- Exports names bindings owned by that feature; other bindings are private.
-- Foreign injection needs the binding's export and an import of its owning feature.
-  Root consumers can inject exported feature bindings.
+- Imports names modules, not bindings, and does not load modules automatically.
+- Exports names bindings owned by that module; other bindings are private.
+- Foreign injection needs the binding's export and an import of its owning module.
+  Root consumers can inject exported module bindings.
 - Binding names are application-wide; duplicate names are rejected.
-- Wrong-side features, import cycles, missing imports and invalid visibility fail
+- Wrong-side modules, import cycles, missing imports and invalid visibility fail
   before factories. Shared manifests may run on either side.
-- Feature Contracts merge with Network.Contracts; duplicate names fail.
+- Module Contracts merge with Network.Contracts; duplicate names fail.
+
+Every application also owns a `Sidewatcher`. It is not a bean and therefore does
+not affect lifecycle counts or dependency ordering. The watcher runs through a
+private scheduler, checks the context status once per second when a `Pulse` is
+available, and writes an `INFO` heartbeat to the application logger. In Roblox,
+the side constructor supplies `RunService.Heartbeat`; portable callers can pass
+`Scheduler.Pulse`. `app:Get("Sidewatcher"):GetSnapshot()` exposes `Ticks`,
+`Failures`, `LastStatus` and `Active`.
 
 ## Scopes and Trove
 
@@ -674,7 +724,7 @@ local clock = container:Get("Clock")
 container:Destroy()
 ```
 
-This layer has no feature or built-in network/player/server composition. Options:
+This layer has no module or built-in network/player/server composition. Options:
 Name, CreateScope, Logger, RetryAttempts, RetryDelay, Wait, Clock, HistoryLimit.
 Methods: Register, RegisterValue, Run, Get, GetState, GetStatus, GetHistory,
 GetLogger, Execute, RetryFailed, Destroy. ReportValidationFailure is Boot's
